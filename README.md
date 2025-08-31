@@ -16,7 +16,7 @@ See `fraud-detection-system/` for details.
 
 ```bash
 # Clone repo
-git clone [URL](https://github.com/KiwiUG/fraud-detection-system.git)
+git clone https://github.com/KiwiUG/fraud-detection-system.git
 cd fraud-detection-system
 
 # Install dependencies
