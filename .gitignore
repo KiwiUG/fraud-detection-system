@@ -1,0 +1,37 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environment
+venv/
+.env/
+*.env
+
+# Jupyter notebook checkpoints
+.ipynb_checkpoints/
+
+# Data
+data/raw/*
+data/processed/*
+!data/.gitkeep
+
+# Models
+*.pkl
+*.joblib
+
+# Logs
+monitoring/*.csv
+logs/
+*.log
+
+# OS files
+.DS_Store
+
+# Docker
+*.tar
+
+# IDE
+.vscode/
+.idea/
