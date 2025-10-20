@@ -1,46 +1,52 @@
-# preprocess.py 
 import pandas as pd
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-def preprocess_data(csv_filepath):
-    """
-    Loads data from a CSV file, engineers features from the timestamp,
-    preprocesses it for model training, and separates features from the target variable.
+def load_and_preprocess_data(file_path: str):
+    """Load, clean, and preprocess UPI transaction dataset."""
 
-    Args:
-        csv_filepath (str): The path to the CSV file.
+    # ---- Load ----
+    df = pd.read_csv(file_path)
 
-    Returns:
-        tuple: A tuple containing the features DataFrame (X) and the target Series (y).
-    """
-    print("Loading and preprocessing data...")
-    # Load the dataset
-    df = pd.read_csv(csv_filepath)
+    # ---- Rename columns ----
+    df.rename(columns={
+        'nameOrig': 'sender',
+        'nameDest': 'receiver',
+        'oldbalanceOrg': 'sender_old_bal',
+        'newbalanceOrig': 'sender_new_bal',
+        'oldbalanceDest': 'receiver_old_bal',
+        'newbalanceDest': 'receiver_new_bal',
+        'isFraud': 'fraud',
+        'isFlaggedFraud': 'flagged'
+    }, inplace=True)
 
-    # --- TIMESTAMP FEATURE ENGINEERING ---
-    # Convert 'timestamp' column to datetime objects
-    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    # ---- Feature Engineering ----
+    df['sender_balance_delta'] = df['sender_new_bal'] - df['sender_old_bal']
+    df['receiver_balance_delta'] = df['receiver_new_bal'] - df['receiver_old_bal']
 
-    # Extract new time-based features
-    # Note: Your original data already has hour, day_of_week, is_weekend
-    # We can add more granular features.
-    df['month'] = df['timestamp'].dt.month
-    df['day'] = df['timestamp'].dt.day
-    df['minute'] = df['timestamp'].dt.minute
-    df['second'] = df['timestamp'].dt.second
-    
-    # Drop the original timestamp and transaction_id columns
-    df = df.drop(['transaction_id', 'timestamp'], axis=1)
-    # --- END OF NEW CODE ---
+    df['sender_expected_new'] = df['sender_old_bal'] - df['amount']
+    df['sender_diff_expected'] = df['sender_new_bal'] - df['sender_expected_new']
 
-    # Identify categorical columns for one-hot encoding
-    categorical_cols = df.select_dtypes(include=['object', 'category']).columns
+    df['sender_zero_balance'] = (df['sender_old_bal'] == 0).astype(int)
+    df['receiver_zero_balance'] = (df['receiver_old_bal'] == 0).astype(int)
 
-    # Apply one-hot encoding
-    df = pd.get_dummies(df, columns=categorical_cols, drop_first=True)
+    # ---- Drop unnecessary columns ----
+    X = df.drop(columns=['fraud', 'flagged', 'sender', 'receiver'])
+    y = df['fraud']
 
-    # Separate features (X) and target (y)
-    X = df.drop('fraud_flag', axis=1)
-    y = df['fraud_flag']
-    
-    print("Preprocessing complete with new time features.")
-    return X, y
+    # ---- Define features ----
+    num_features = [
+        'amount', 'sender_old_bal', 'sender_new_bal',
+        'receiver_old_bal', 'receiver_new_bal',
+        'sender_balance_delta', 'receiver_balance_delta',
+        'sender_diff_expected'
+    ]
+    cat_features = ['type']
+
+    # ---- Column Transformer ----
+    preprocessor = ColumnTransformer([
+        ('num', StandardScaler(), num_features),
+        ('cat', OneHotEncoder(handle_unknown='ignore'), cat_features)
+    ])
+
+    return X, y, preprocessor
