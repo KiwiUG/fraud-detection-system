@@ -29,10 +29,13 @@ if __name__ == '__main__':
     print("--- QR CODE GENERATION ---")
     
     # Define the users to generate QR codes for
-    safe_id = "U-1001"
-    scammer_id = "S-2002"
+    safe_id = "utsav16"
+    mixed_id = "aarnov321"
+    scammer_id = "himansu367"
 
+    # Generate QR codes for all users
     generate_qr_code(safe_id)
+    generate_qr_code(mixed_id)
     generate_qr_code(scammer_id)
 
-    print("Generation complete. Run 'python fraud_scanner.py' next.")
+    print("Generation complete. Run 'python api.py' or 'python fraud_scanner.py' next.")

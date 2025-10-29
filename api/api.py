@@ -3,21 +3,27 @@ import pandas as pd
 import os
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
-import numpy as np # Added for math operations
+import numpy as np
 
-# --- CONFIGURATION ---
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TRANSACTION_FILE = os.path.join(BASE_DIR, "data", "user_data.csv")
-MODEL_FILE = os.path.join(BASE_DIR, "chosen_model", "rf_fraud_model.joblib")
-PREPROCESSOR_FILE = os.path.join(BASE_DIR, "chosen_model", "preprocessor_rf.joblib")
+# --- NEW: PATH CONFIGURATION ---
+# Get the absolute path of the directory where this script (api.py) is located
+# This is the 'api/' folder
+API_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# --- CONFIGURATION (UPDATED) ---
+# Use this API_DIR to build the correct file paths
+TRANSACTION_FILE = os.path.join(API_DIR, "data", "user_data.csv")
+MODEL_FILE = os.path.join(API_DIR, "chosen_model", "rf_fraud_model.joblib")
+PREPROCESSOR_FILE = os.path.join(API_DIR, "chosen_model", "preprocessor_rf.joblib")
+# --- END OF CHANGES ---
 
-# --- DATA LOADING (No changes) ---
+# --- DATA LOADING ---
 def load_and_index_data(file_path: str):
     try:
         df = pd.read_csv(file_path)
     except FileNotFoundError:
         print(f"CRITICAL ERROR: Transaction file '{file_path}' not found.")
+        print("Make sure the 'data' folder is *inside* your 'api' folder.")
         return None
     
     indexed_data = {}
@@ -27,7 +33,7 @@ def load_and_index_data(file_path: str):
     print(f"✅ Loaded {df.shape[0]} transactions for {len(indexed_data)} unique users.")
     return indexed_data
 
-# --- ML COMPONENT LOADING (No changes) ---
+# --- ML COMPONENT LOADING ---
 def load_ml_components(model_filepath: str, preprocessor_filepath: str):
     try:
         model = joblib.load(model_filepath)
@@ -36,6 +42,7 @@ def load_ml_components(model_filepath: str, preprocessor_filepath: str):
         return model, preprocessor
     except FileNotFoundError:
         print("CRITICAL ERROR: Model or Preprocessor files not found.")
+        print("Make sure the 'chosen_model' folder is *inside* your 'api' folder.")
         return None, None
 
 # --- FEATURE ENGINEERING (No changes) ---
@@ -57,19 +64,12 @@ def single_instance_feature_engineering(df_raw: pd.DataFrame) -> pd.DataFrame:
 
     return df[num_features + cat_features]
 
-# --- CORE PREDICTION LOGIC (CHANGED) ---
+# --- CORE PREDICTION LOGIC (No changes) ---
 def check_user_reputation(user_id: str, model, preprocessor, indexed_data):
-    """
-    Runs the ML model on a user's entire history and finds the
-    MAXIMUM fraud probability.
-    
-    Returns a tuple: (max_fraud_probability, transactions_analyzed)
-    """
     transaction_history = indexed_data.get(user_id)
     if not transaction_history:
-        return 0.0, 0 # Return 0% risk and 0 transactions
+        return 0.0, 0 
 
-    # We will find the highest fraud score in the user's history
     max_fraud_probability = 0.0
     
     for i, transaction_dict in enumerate(transaction_history):
@@ -77,27 +77,18 @@ def check_user_reputation(user_id: str, model, preprocessor, indexed_data):
             df_raw = pd.DataFrame([transaction_dict])
             X_engineered = single_instance_feature_engineering(df_raw)
             X_transformed = preprocessor.transform(X_engineered)
-            
-            # --- CHANGE 1: Use predict_proba() ---
-            # This returns probabilities for [class_0, class_1]
-            # We want the probability of class 1 (fraud)
             current_fraud_prob = model.predict_proba(X_transformed)[0][1]
 
-            # --- CHANGE 2: Find the maximum probability ---
             if current_fraud_prob > max_fraud_probability:
                 max_fraud_probability = current_fraud_prob
-            
-            # --- CHANGE 3: Removed the 'break' statement ---
-            # We must check ALL transactions to find the maximum.
         
         except Exception as e:
             print(f"    - ERROR processing Txn #{i+1} for user {user_id}: {e}")
             continue
 
-    # Return the highest probability found
     return max_fraud_probability, len(transaction_history)
 
-# --- API SETUP ---
+# --- API SETUP (No changes) ---
 app = FastAPI(
     title="Fraud Detection API",
     description="An API to check user reputation based on transaction history.",
@@ -120,15 +111,9 @@ def load_assets():
     app.state.indexed_data = indexed_data
     print("✅ Server startup complete. Ready to accept requests.")
 
-
 @app.get("/reputation/{user_id}")
 def get_user_reputation(user_id: str, request: Request):
-    """
-    Get the reputation for a single user ID.
-    Returns a JSON object with a risk_percentage (0-100).
-    """
     print(f"Received request for user_id: {user_id}")
-
     model = request.app.state.model
     preprocessor = request.app.state.preprocessor
     indexed_data = request.app.state.indexed_data
@@ -139,16 +124,10 @@ def get_user_reputation(user_id: str, request: Request):
             status_code=404, 
             detail=f"User ID '{user_id}' not found in transaction history."
         )
-
-    # --- API LOGIC CHANGED ---
     
-    # 1. Get the max fraud score (e.g., 0.925)
     max_prob, count = check_user_reputation(user_id, model, preprocessor, indexed_data)
-    
-    # 2. Convert to a percentage (e.g., 92.5)
     risk_percentage = round(max_prob * 100, 2)
     
-    # 3. Define a risk level and message for the frontend
     if risk_percentage > 75:
         risk_level = "HIGH"
         message = "User has past transactions with a very high probability of fraud."
@@ -161,7 +140,6 @@ def get_user_reputation(user_id: str, request: Request):
         
     print(f"Returning risk_percentage for {user_id}: {risk_percentage}%")
     
-    # 4. Return the new JSON response
     return {
         "user_id": user_id,
         "risk_percentage": risk_percentage,
@@ -174,7 +152,10 @@ def get_user_reputation(user_id: str, request: Request):
 def read_root():
     return {"message": "Fraud Detection API is running. Go to /docs for documentation."}
 
-# --- RUN THE API ---
+# --- RUN THE API (MODIFIED FOR PRODUCTION) ---
 if __name__ == "__main__":
-    uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=True)
+    port = int(os.environ.get("PORT", 8000))
+    # We can now use the *simple* start command
+    # because this script is in the root of the Render project
+    uvicorn.run("api:app", host="0.0.0.0", port=port)
 
