@@ -5,8 +5,24 @@ from sklearn.metrics import classification_report, confusion_matrix
 from imblearn.over_sampling import SMOTE
 from sklearn.ensemble import RandomForestClassifier
 import joblib
+from preprocess import load_and_preprocess_data# Install dependencies as needed:
+# pip install kagglehub[pandas-datasets]
+import kagglehub
+from kagglehub import KaggleDatasetAdapter
 
-from preprocess import load_and_preprocess_data
+# Set the path to the file you'd like to load
+file_path = "PS_20174392719_1491204439457_log.csv"
+
+# Load the latest version
+df = kagglehub.load_dataset(
+  KaggleDatasetAdapter.PANDAS,
+  "ealaxi/paysim1",
+  path=file_path,
+  # Provide any additional arguments like 
+  # sql_query or pandas_kwargs. See the 
+  # documenation for more information:
+  # https://github.com/Kaggle/kagglehub/blob/main/README.md#kaggledatasetadapterpandas
+)
 
 # ---- Load Data ----
 print("📂 Loading dataset...")
