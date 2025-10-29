@@ -4,30 +4,19 @@ import os
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 import numpy as np
-import requests # <-- 1. IMPORT REQUESTS
+# --- REMOVED 'requests' ---
 
 # --- PATH CONFIGURATION ---
 # This line finds the directory where this script (api.py) is located
 API_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# --- CONFIGURATION (UPDATED) ---
-# Read the secret URL from the environment variable set in Render
-MODEL_URL = os.environ.get("MODEL_URL")
+# --- CONFIGURATION (SIMPLIFIED FOR LOCAL USE) ---
+# --- REMOVED 'MODEL_URL' and environment variable logic ---
 
-# --- ADD THIS CHECK ---
-if not MODEL_URL:
-    print("CRITICAL ERROR: 'MODEL_URL' environment variable not set.")
-    # This will stop the server from starting if the URL is missing
-    raise ValueError("MODEL_URL environment variable not set. Server cannot start.")
-# --- END OF CHECK ---
-
-
-# Local paths where files will be stored on the server
-# UPDATED: Removed "chosen_model" from the path
-LOCAL_MODEL_PATH = os.path.join(API_DIR, "rf_fraud_model.joblib")
-LOCAL_PREPROCESSOR_PATH = os.path.join(API_DIR, "preprocessor_rf.joblib")
-
-TRANSACTION_FILE = os.path.join(API_DIR, "user_data.csv")
+# Local paths to your files
+LOCAL_MODEL_PATH = os.path.join(API_DIR,"chosen_model", "rf_fraud_model.joblib")
+LOCAL_PREPROCESSOR_PATH = os.path.join(API_DIR, "chosen_model", "preprocessor_rf.joblib")
+TRANSACTION_FILE = os.path.join(API_DIR, "data", "user_data.csv")
 # --- END OF CHANGES ---
 
 # --- DATA LOADING ---
@@ -39,7 +28,7 @@ def load_and_index_data(file_path: str):
         df = pd.read_csv(file_path)
     except FileNotFoundError:
         print(f"CRITICAL ERROR: Transaction file '{file_path}' not found.")
-        print("Make sure 'user_data.csv' is in your 'api/data' folder and committed to Git.")
+        print("Make sure 'user_data.csv' is in your 'api/data' folder.")
         return None
     
     indexed_data = {}
@@ -49,43 +38,31 @@ def load_and_index_data(file_path: str):
     print(f"✅ Loaded {df.shape[0]} transactions for {len(indexed_data)} unique users.")
     return indexed_data
 
-# --- ML COMPONENT LOADING (MODIFIED) ---
-def load_ml_components(model_url: str, local_model_path: str, local_preprocessor_path: str):
+# --- ML COMPONENT LOADING (SIMPLIFIED) ---
+def load_ml_components(local_model_path: str, local_preprocessor_path: str):
     """
-    Downloads the model from Firebase if it doesn't exist,
-    then loads both components.
+    Loads the model and preprocessor directly from the local disk.
     """
     try:
-        # --- 3. ADD DOWNLOAD LOGIC ---
-        # Check if the model file *already exists* on the server's disk
-        if not os.path.exists(local_model_path):
-            print(f"Model not found locally. Downloading from Firebase (this may take a moment)...")
-            
-            # Download the file
-            response = requests.get(model_url)
-            response.raise_for_status() # This will raise an error if the download fails
-            
-            # Write the file to disk
-            with open(local_model_path, 'wb') as f:
-                f.write(response.content)
-            print("✅ Model downloaded successfully.")
-        else:
-            print("✅ Model file already exists locally.")
-        # --- END OF DOWNLOAD LOGIC ---
+        # --- REMOVED ALL DOWNLOAD LOGIC ---
 
-        # Now, load the files from the local disk
-        model = joblib.load(local_model_path)
-        
-        # Preprocessor is small and should be in Git, so we just load it
-        if not os.path.exists(local_preprocessor_path):
-            print(f"CRITICAL ERROR: Preprocessor file not found at {local_preprocessor_path}")
-            # UPDATED: Changed error message
-            print("Make sure 'preprocessor_rf.joblib' is in your 'api/' folder and committed to Git.")
+        # Check if local model file exists
+        if not os.path.exists(local_model_path):
+            print(f"CRITICAL ERROR: Model file not found at {local_model_path}")
+            print("Make sure 'rf_fraud_model.joblib' is in your 'api/' folder.")
             return None, None
             
+        # Check if local preprocessor file exists
+        if not os.path.exists(local_preprocessor_path):
+            print(f"CRITICAL ERROR: Preprocessor file not found at {local_preprocessor_path}")
+            print("Make sure 'preprocessor_rf.joblib' is in your 'api/' folder.")
+            return None, None
+            
+        # Load files from the local disk
+        model = joblib.load(local_model_path)
         preprocessor = joblib.load(local_preprocessor_path)
         
-        print("✅ Loaded model and preprocessor.")
+        print("✅ Loaded local model and preprocessor.")
         return model, preprocessor
         
     except Exception as e:
@@ -151,7 +128,7 @@ def check_user_reputation(user_id: str, model, preprocessor, indexed_data):
 
 # --- API SETUP ---
 app = FastAPI(
-    title="Fraud Detection API",
+    title="Fraud Detection API (Local Version)",
     description="An API to check user reputation based on transaction history.",
     version="1.0.0"
 )
@@ -161,10 +138,10 @@ def load_assets():
     """
     Load all ML assets and data into memory on server startup.
     """
-    print("Server starting up...")
+    print("Server starting up (LOCAL MODE)...")
     
-    # --- 4. UPDATE THE FUNCTION CALL ---
-    model, preprocessor = load_ml_components(MODEL_URL, LOCAL_MODEL_PATH, LOCAL_PREPROCESSOR_PATH)
+    # --- UPDATED THE FUNCTION CALL (no more MODEL_URL) ---
+    model, preprocessor = load_ml_components(LOCAL_MODEL_PATH, LOCAL_PREPROCESSOR_PATH)
     
     if model is None or preprocessor is None:
         raise RuntimeError("Could not load ML components. Server cannot start.")
@@ -239,5 +216,6 @@ if __name__ == "__main__":
     # Get the port from the environment variable (Render sets this)
     # Default to 8000 for local testing
     port = int(os.environ.get("PORT", 8000))
-    uvicorn.run("api:app", host="0.0.0.0", port=port)
+    # Run with reload=True for easy local development
+    uvicorn.run("api:app", host="0.0.0.0", port=port, reload=True)
 

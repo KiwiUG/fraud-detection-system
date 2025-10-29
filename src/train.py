@@ -59,8 +59,8 @@ print("🚀 Training model...")
 model.fit(X_res, y_res)
 print("✅ Model training complete.")
 
-joblib.dump(model, "chosen_model/rf_fraud_model.joblib")
-joblib.dump(preprocessor, "chosen_model/preprocessor_rf.joblib")
+joblib.dump(model, "api/chosen_model/rf_fraud_model.joblib")
+joblib.dump(preprocessor, "api/hosen_model/preprocessor_rf.joblib")
 
 # ---- Step 4: Evaluate ----
 y_pred = model.predict(X_test_transformed)

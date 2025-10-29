@@ -11,7 +11,7 @@ export default function ScannerScreen() {
   const cameraRef = useRef(null);
 
   // 🔹 Update this to your computer’s local IP
-  const BASE_URL = "http://10.34.67.73:8000";
+  const BASE_URL = "http://10.34.67.151:8000";
 
   // --- Handle camera permission ---
   if (!permission) return <View />;
