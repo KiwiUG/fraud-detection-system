@@ -13,7 +13,6 @@ fraud-env/
 .ipynb_checkpoints/
 
 # Data
-data/*
 *.csv
 !data/.gitkeep
 
