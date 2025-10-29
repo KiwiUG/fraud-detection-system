@@ -34,3 +34,5 @@ logs/
 # IDE
 .vscode/
 .idea/
+node_modules
+.expo

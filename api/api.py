@@ -4,26 +4,42 @@ import os
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 import numpy as np
+import requests # <-- 1. IMPORT REQUESTS
 
-# --- NEW: PATH CONFIGURATION ---
-# Get the absolute path of the directory where this script (api.py) is located
-# This is the 'api/' folder
+# --- PATH CONFIGURATION ---
+# This line finds the directory where this script (api.py) is located
 API_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # --- CONFIGURATION (UPDATED) ---
-# Use this API_DIR to build the correct file paths
-TRANSACTION_FILE = os.path.join(API_DIR, "data", "user_data.csv")
-MODEL_FILE = os.path.join(API_DIR, "chosen_model", "rf_fraud_model.joblib")
-PREPROCESSOR_FILE = os.path.join(API_DIR, "chosen_model", "preprocessor_rf.joblib")
+# Read the secret URL from the environment variable set in Render
+MODEL_URL = os.environ.get("MODEL_URL")
+
+# --- ADD THIS CHECK ---
+if not MODEL_URL:
+    print("CRITICAL ERROR: 'MODEL_URL' environment variable not set.")
+    # This will stop the server from starting if the URL is missing
+    raise ValueError("MODEL_URL environment variable not set. Server cannot start.")
+# --- END OF CHECK ---
+
+
+# Local paths where files will be stored on the server
+# UPDATED: Removed "chosen_model" from the path
+LOCAL_MODEL_PATH = os.path.join(API_DIR, "rf_fraud_model.joblib")
+LOCAL_PREPROCESSOR_PATH = os.path.join(API_DIR, "preprocessor_rf.joblib")
+
+TRANSACTION_FILE = os.path.join(API_DIR, "user_data.csv")
 # --- END OF CHANGES ---
 
 # --- DATA LOADING ---
 def load_and_index_data(file_path: str):
+    """
+    Loads transactions and indexes them by 'user_id'.
+    """
     try:
         df = pd.read_csv(file_path)
     except FileNotFoundError:
         print(f"CRITICAL ERROR: Transaction file '{file_path}' not found.")
-        print("Make sure the 'data' folder is *inside* your 'api' folder.")
+        print("Make sure 'user_data.csv' is in your 'api/data' folder and committed to Git.")
         return None
     
     indexed_data = {}
@@ -33,27 +49,63 @@ def load_and_index_data(file_path: str):
     print(f"✅ Loaded {df.shape[0]} transactions for {len(indexed_data)} unique users.")
     return indexed_data
 
-# --- ML COMPONENT LOADING ---
-def load_ml_components(model_filepath: str, preprocessor_filepath: str):
+# --- ML COMPONENT LOADING (MODIFIED) ---
+def load_ml_components(model_url: str, local_model_path: str, local_preprocessor_path: str):
+    """
+    Downloads the model from Firebase if it doesn't exist,
+    then loads both components.
+    """
     try:
-        model = joblib.load(model_filepath)
-        preprocessor = joblib.load(preprocessor_filepath)
-        print(f"✅ Loaded model and preprocessor.")
+        # --- 3. ADD DOWNLOAD LOGIC ---
+        # Check if the model file *already exists* on the server's disk
+        if not os.path.exists(local_model_path):
+            print(f"Model not found locally. Downloading from Firebase (this may take a moment)...")
+            
+            # Download the file
+            response = requests.get(model_url)
+            response.raise_for_status() # This will raise an error if the download fails
+            
+            # Write the file to disk
+            with open(local_model_path, 'wb') as f:
+                f.write(response.content)
+            print("✅ Model downloaded successfully.")
+        else:
+            print("✅ Model file already exists locally.")
+        # --- END OF DOWNLOAD LOGIC ---
+
+        # Now, load the files from the local disk
+        model = joblib.load(local_model_path)
+        
+        # Preprocessor is small and should be in Git, so we just load it
+        if not os.path.exists(local_preprocessor_path):
+            print(f"CRITICAL ERROR: Preprocessor file not found at {local_preprocessor_path}")
+            # UPDATED: Changed error message
+            print("Make sure 'preprocessor_rf.joblib' is in your 'api/' folder and committed to Git.")
+            return None, None
+            
+        preprocessor = joblib.load(local_preprocessor_path)
+        
+        print("✅ Loaded model and preprocessor.")
         return model, preprocessor
-    except FileNotFoundError:
-        print("CRITICAL ERROR: Model or Preprocessor files not found.")
-        print("Make sure the 'chosen_model' folder is *inside* your 'api' folder.")
+        
+    except Exception as e:
+        print(f"CRITICAL ERROR: Failed to load components. Error: {e}")
         return None, None
 
-# --- FEATURE ENGINEERING (No changes) ---
-def single_instance_feature_engineering(df_raw: pd.DataFrame) -> pd.DataFrame:
+# --- FEATURE ENGINEERING ---
+def single_instance_feature_engineering(df_raw: pd.DataFrame):
+    """
+    Applies the feature engineering logic used during training.
+    """
     df = df_raw.copy()
 
+    # Create the new features
     df['sender_balance_delta'] = df['sender_new_bal'] - df['sender_old_bal']
     df['receiver_balance_delta'] = df['receiver_new_bal'] - df['receiver_old_bal']
     df['sender_expected_new'] = df['sender_old_bal'] - df['amount']
     df['sender_diff_expected'] = df['sender_new_bal'] - df['sender_expected_new']
     
+    # Define the exact columns the preprocessor expects
     num_features = [
         'amount', 'sender_old_bal', 'sender_new_bal',
         'receiver_old_bal', 'receiver_new_bal',
@@ -62,13 +114,18 @@ def single_instance_feature_engineering(df_raw: pd.DataFrame) -> pd.DataFrame:
     ]
     cat_features = ['type']
 
+    # Return *only* those columns
     return df[num_features + cat_features]
 
-# --- CORE PREDICTION LOGIC (No changes) ---
+# --- CORE PREDICTION LOGIC ---
 def check_user_reputation(user_id: str, model, preprocessor, indexed_data):
+    """
+    Runs the ML model on a user's entire history and finds the
+    MAXIMUM fraud probability.
+    """
     transaction_history = indexed_data.get(user_id)
-    if not transaction_history:
-        return 0.0, 0 
+    if not transaction_history: 
+        return 0.0, 0 # Return 0% risk and 0 transactions
 
     max_fraud_probability = 0.0
     
@@ -77,18 +134,22 @@ def check_user_reputation(user_id: str, model, preprocessor, indexed_data):
             df_raw = pd.DataFrame([transaction_dict])
             X_engineered = single_instance_feature_engineering(df_raw)
             X_transformed = preprocessor.transform(X_engineered)
+            
+            # Get probability of class 1 (fraud)
             current_fraud_prob = model.predict_proba(X_transformed)[0][1]
 
             if current_fraud_prob > max_fraud_probability:
                 max_fraud_probability = current_fraud_prob
         
         except Exception as e:
+            # Log error but continue checking other transactions
             print(f"    - ERROR processing Txn #{i+1} for user {user_id}: {e}")
             continue
 
+    # Return the highest probability found
     return max_fraud_probability, len(transaction_history)
 
-# --- API SETUP (No changes) ---
+# --- API SETUP ---
 app = FastAPI(
     title="Fraud Detection API",
     description="An API to check user reputation based on transaction history.",
@@ -97,8 +158,14 @@ app = FastAPI(
 
 @app.on_event("startup")
 def load_assets():
+    """
+    Load all ML assets and data into memory on server startup.
+    """
     print("Server starting up...")
-    model, preprocessor = load_ml_components(MODEL_FILE, PREPROCESSOR_FILE)
+    
+    # --- 4. UPDATE THE FUNCTION CALL ---
+    model, preprocessor = load_ml_components(MODEL_URL, LOCAL_MODEL_PATH, LOCAL_PREPROCESSOR_PATH)
+    
     if model is None or preprocessor is None:
         raise RuntimeError("Could not load ML components. Server cannot start.")
     
@@ -106,14 +173,24 @@ def load_assets():
     if indexed_data is None:
         raise RuntimeError("Could not load transaction data. Server cannot start.")
     
+    # Store the loaded assets in the app's state
     app.state.model = model
     app.state.preprocessor = preprocessor
     app.state.indexed_data = indexed_data
+    
     print("✅ Server startup complete. Ready to accept requests.")
 
+
+# --- API ENDPOINTS ---
 @app.get("/reputation/{user_id}")
 def get_user_reputation(user_id: str, request: Request):
+    """
+    Get the reputation for a single user ID.
+    Returns a JSON object with a risk_percentage (0-100).
+    """
     print(f"Received request for user_id: {user_id}")
+
+    # Get the loaded assets from the app's state
     model = request.app.state.model
     preprocessor = request.app.state.preprocessor
     indexed_data = request.app.state.indexed_data
@@ -124,10 +201,14 @@ def get_user_reputation(user_id: str, request: Request):
             status_code=404, 
             detail=f"User ID '{user_id}' not found in transaction history."
         )
-    
+
+    # Get the max fraud score (e.g., 0.925)
     max_prob, count = check_user_reputation(user_id, model, preprocessor, indexed_data)
+    
+    # Convert to a percentage (e.g., 92.5)
     risk_percentage = round(max_prob * 100, 2)
     
+    # Define a risk level and message for the frontend
     if risk_percentage > 75:
         risk_level = "HIGH"
         message = "User has past transactions with a very high probability of fraud."
@@ -140,6 +221,7 @@ def get_user_reputation(user_id: str, request: Request):
         
     print(f"Returning risk_percentage for {user_id}: {risk_percentage}%")
     
+    # Return the new JSON response
     return {
         "user_id": user_id,
         "risk_percentage": risk_percentage,
@@ -152,10 +234,10 @@ def get_user_reputation(user_id: str, request: Request):
 def read_root():
     return {"message": "Fraud Detection API is running. Go to /docs for documentation."}
 
-# --- RUN THE API (MODIFIED FOR PRODUCTION) ---
+# --- RUN THE API ---
 if __name__ == "__main__":
+    # Get the port from the environment variable (Render sets this)
+    # Default to 8000 for local testing
     port = int(os.environ.get("PORT", 8000))
-    # We can now use the *simple* start command
-    # because this script is in the root of the Render project
     uvicorn.run("api:app", host="0.0.0.0", port=port)
 
