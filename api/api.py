@@ -6,9 +6,11 @@ from fastapi import FastAPI, HTTPException, Request
 import numpy as np # Added for math operations
 
 # --- CONFIGURATION ---
-TRANSACTION_FILE = "data/user_data.csv"
-MODEL_FILE = os.path.join("chosen_model", "rf_fraud_model.joblib")
-PREPROCESSOR_FILE = os.path.join("chosen_model", "preprocessor_rf.joblib")
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TRANSACTION_FILE = os.path.join(BASE_DIR, "data", "user_data.csv")
+MODEL_FILE = os.path.join(BASE_DIR, "chosen_model", "rf_fraud_model.joblib")
+PREPROCESSOR_FILE = os.path.join(BASE_DIR, "chosen_model", "preprocessor_rf.joblib")
+
 
 # --- DATA LOADING (No changes) ---
 def load_and_index_data(file_path: str):
